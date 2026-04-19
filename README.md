@@ -1,64 +1,72 @@
 # multilingual-token-cost
 
-Why does the same sentence cost 2.3x more tokens in Japanese than English? This repo investigates tokenization cost inequity across languages by building a BPE tokenizer from scratch.
+Why does the same sentence cost 2.3x more tokens in Japanese than English? This repo investigates tokenization cost inequity across languages by building a BPE tokenizer from scratch and testing whether vocabulary extension can close the gap.
 
 ## Background
 
-Most major LLMs (GPT, Claude, LLaMA) use [Byte Pair Encoding](https://en.wikipedia.org/wiki/Byte-pair_encoding) (BPE) for tokenization. BPE learns merge rules from a training corpus — and when that corpus is predominantly English, English gets better compression while other languages pay more per API call for the same meaning.
+Most major LLMs (GPT, Claude, LLaMA) use [Byte Pair Encoding](https://en.wikipedia.org/wiki/Byte-pair_encoding) (BPE) for tokenization, originally introduced for NLP by [Sennrich et al., 2016](https://arxiv.org/abs/1508.07909). BPE learns merge rules from a training corpus — and when that corpus is predominantly English, English text gets better compression while other languages pay more tokens for the same meaning.
 
-Instead of accepting this as a given and working around it by downsizing prompts, this project digs into the root cause.
+## Experiments
 
-## What's in the repo
+### Experiment 1: English-Heavy BPE
 
-`bpe_from_scratch.py` — A minimal BPE tokenizer implementation with three experiments:
-
-**Experiment 1: English-heavy training.** Trains on a corpus that's ~90% English, then tokenizes the same sentence in five languages.
+Train a BPE tokenizer on a 90% English corpus. Tokenize the same sentence in five languages.
 
 | Language | Tokens | vs English |
 |----------|--------|------------|
-| English  | 34     | baseline   |
-| Japanese | 77     | 2.3x       |
-| French   | 48     | 1.4x       |
-| Chinese  | 39     | 1.1x       |
-| Korean   | 65     | 1.9x       |
+| English | 34 | baseline |
+| Japanese | 77 | 2.3x |
+| Korean | 65 | 1.9x |
+| French | 48 | 1.4x |
+| Chinese | 39 | 1.1x |
 
-**Experiment 2: Balanced training (English + Japanese).** Inflates Japanese training data to give it equal representation.
+### Experiment 2: Balanced Training Data (Japanese)
 
-| | English-heavy | Balanced |
-|---|---|---|
-| English | 34 tokens | 43 tokens |
-| Japanese | 77 tokens | 64 tokens (1.5x) |
+Inflate Japanese training data to balance the corpus. Japanese improved (77 → 64 tokens), but English got worse (34 → 43). Merge slots are a zero-sum resource.
 
-Gap reduced by 34% — but English got worse. Merge slots are a fixed resource.
+### Experiment 3: Balanced Training Data (Chinese)
 
-**Experiment 3: Balanced training (English + Chinese).** Replaces Japanese with Simplified Chinese.
+Repeat with Chinese. Chinese didn't improve at all — its byte patterns are too scattered for BPE merges to cascade. But Chinese has a compensating advantage: language density (fewer characters to express the same meaning).
 
-| | English-heavy | Balanced |
-|---|---|---|
-| English | 34 tokens | 43 tokens |
-| Chinese | 39 tokens | 39 tokens (no change) |
+### Experiment 4: Bolt-On Vocabulary
 
-Chinese didn't improve at all. Its byte patterns are too scattered for BPE merges to cascade.
+Add language-specific tokens (Chinese characters/bigrams, Japanese hiragana/katakana/words, Korean syllables, French accented characters/words) to the tokenizer after training, without retraining. Inspired by [Chinese LLaMA](https://arxiv.org/abs/2304.08177).
 
-## Three factors behind the inequity
+| Language | Before | After | Reduction | vs English |
+|----------|--------|-------|-----------|------------|
+| Japanese | 77 | 11 | 86% | 2.3x → 0.3x |
+| Chinese | 39 | 9 | 77% | 1.1x → 0.3x |
+| French | 48 | 22 | 54% | 1.4x → 0.6x |
+| Korean | 65 | 43 | 34% | 1.9x → 1.3x |
+| English | 34 | 34 | — | baseline |
 
-**UTF-8 encoding.** CJK characters are 3 bytes each; Latin characters are 1 byte. A 3x cost disadvantage before any merging begins.
+The tokenizer-side fix works. But making the model understand new tokens requires continued pretraining — expensive, risky (catastrophic forgetting), and architecturally constrained. See the [full writeup](https://www.linkedin.com/in/YOUR_PROFILE) for details.
 
-**Training data distribution.** BPE is a popularity contest. The language with more representation in the training corpus wins more merge slots and gets better compression.
+## Three Root Causes of Tokenization Inequity
 
-**Character set structure.** Japanese kana share UTF-8 byte prefixes, so balancing helps. Chinese characters are spread across wider byte ranges, making merges harder even with balanced data. However, Chinese compensates with language density — fewer characters needed to express the same meaning.
+1. **UTF-8 encoding.** CJK characters are 3 bytes each; Latin characters are 1 byte. That's a 3x cost disadvantage before any merging begins.
+2. **Training data distribution.** BPE is a popularity contest. The language with more text in the corpus wins more merge slots. English dominates most training corpora.
+3. **Character set structure.** Some languages (like Chinese) have byte patterns too scattered for BPE merges to cascade effectively, regardless of training data balance.
 
-## Run it
+## Files
+
+- `bpe_from_scratch.py` — Experiments 1–3: BPE tokenizer from scratch, English-heavy vs balanced training
+- `bolt_on_vocab_experiment.py` — Experiment 4: Bolt-on vocabulary extension and cost analysis
+
+## Run
 
 ```bash
 python bpe_from_scratch.py
+python bolt_on_vocab_experiment.py
 ```
 
-No dependencies. No API keys. Just Python 3.
+No dependencies. Pure Python. No API keys needed.
 
-## What's next
+## Related
 
-Exploring vocabulary extension approaches — bolting language-specific tokens onto existing tokenizers to reduce cost without full retraining. Similar to the approach used by [Chinese LLaMA](https://github.com/ymcui/Chinese-LLaMA-Alpaca).
+- [BPE original NLP paper](https://arxiv.org/abs/1508.07909) — Sennrich et al., 2016
+- [Chinese LLaMA](https://arxiv.org/abs/2304.08177) — Vocabulary extension approach
+- [ICML 2025 Tokenization Workshop](https://tokenization-workshop.github.io/) — Active research on alternatives to BPE
 
 ## License
 
